@@ -9,4 +9,5 @@ import (
 func main() {
 	fmt.Println("Hello, world!")
 	subgittest.PrintName()
+	subgittest.PrintName2()
 }
