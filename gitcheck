@@ -1,0 +1,80 @@
+#!/bin/bash
+
+commit="$1"
+
+if [ -z "$commit" ]; then
+    echo "Usage: $0 <commit-hash>"
+    exit 1
+fi
+
+# Validate the commit
+if ! git cat-file -e "$commit^{commit}" 2>/dev/null; then
+    echo "Error: Commit $commit not found."
+    exit 1
+fi
+
+# Helper: extract remote URL in web format
+get_commit_url() {
+    remote_name="$1"
+    commit_sha="$2"
+
+    remote_url=$(git remote get-url "$remote_name")
+    
+    # Convert SSH to HTTPS-style URL
+    if [[ "$remote_url" =~ ^git@([^:]+):([^/]+)/(.+)\.git$ ]]; then
+        host="${BASH_REMATCH[1]}"
+        user="${BASH_REMATCH[2]}"
+        repo="${BASH_REMATCH[3]}"
+        echo "https://$host/$user/$repo/commit/$commit_sha"
+    elif [[ "$remote_url" =~ ^https?://([^/]+)/([^/]+)/(.+)\.git$ ]]; then
+        host="${BASH_REMATCH[1]}"
+        user="${BASH_REMATCH[2]}"
+        repo="${BASH_REMATCH[3]}"
+        echo "https://$host/$user/$repo/commit/$commit_sha"
+    else
+        echo "Unknown remote URL format: $remote_url"
+        return 1
+    fi
+}
+
+# Get upstream
+upstream_branch=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
+
+# Check if commit is in current branch
+if git merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
+    if [ -n "$upstream_branch" ]; then
+        remote=$(echo "$upstream_branch" | cut -d'/' -f1)
+        url=$(get_commit_url "$remote" "$commit")
+        echo "$url"
+        exit 0
+    fi
+fi
+
+# Check remote branches
+remote_branches=$(git branch -r --contains "$commit" | sed 's/^[[:space:]]*//')
+
+if [ -n "$remote_branches" ]; then
+    origin_branch=$(echo "$remote_branches" | grep "^origin/" | head -n1)
+    if [ -n "$origin_branch" ]; then
+        remote="origin"
+    else
+        first_remote_branch=$(echo "$remote_branches" | head -n1)
+        remote=$(echo "$first_remote_branch" | cut -d'/' -f1)
+    fi
+
+    url=$(get_commit_url "$remote" "$commit")
+    echo "$url"
+    exit 0
+fi
+
+# Check local-only
+local_branches=$(git branch --contains "$commit" | sed 's/^[* ]*//')
+if [ -n "$local_branches" ]; then
+    echo "Commit is only in local branch(es):"
+    echo "$local_branches"
+    echo "No remote URL available."
+    exit 0
+fi
+
+echo "Commit not found in any known local or remote branch. Possibly orphaned or a dangling commit."
+exit 1
